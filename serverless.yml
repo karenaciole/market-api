@@ -1,0 +1,130 @@
+service: market-api
+
+frameworkVersion: '^3.30.1'
+
+layers:
+  products:
+    path: ./build
+    name: ${self:service}-products-layer
+    description: CRUD system that manages market products
+    compatibleRuntimes:
+      - python3.8
+    retain: false
+
+provider:
+  name: aws
+  region: us-west-2
+  runtime: python3.8
+  stage: dev
+  environment:
+    APP_AWS_DEFAULT_REGION: ${env:AWS_DEFAULT_REGION}
+    APP_AWS_ACCESS_KEY_ID: ${env:AWS_ACCESS_KEY_ID}
+    APP_AWS_SECRET_ACCESS_KEY: ${env:AWS_SECRET_ACCESS_KEY}
+  layers:
+    - { Ref: ProductsLambdaLayer }
+  iam:
+    role:
+      statements:
+        - Effect: Allow
+          Action:
+            - logs:CreateLogGroup
+            - logs:CreateLogStream
+            - logs:PutLogEvents
+          Resource: "*"
+        - Effect: Allow
+          Action:
+            - dynamodb:Query
+            - dynamodb:Scan
+            - dynamodb:GetItem
+            - dynamodb:PutItem
+            - dynamodb:UpdateItem
+            - dynamodb:DeleteItem
+          Resource: "arn:aws:dynamodb:us-west-2:*:*"
+        - Effect: Allow
+          Action:
+            - s3:*
+          Resource: "*"
+
+functions:
+  CreateProduct:
+    handler: src/api/create_product.lambda_handler
+    events:
+      - http:
+          method: POST
+          path: /products
+          cors: true
+  
+  InsertMedia:
+    handler: src/api/insert_media.lambda_handler
+    events:
+      - s3:
+          bucket: ${self:service}-ninamedias
+          event: s3:ObjectCreated:*
+          existing: true
+          
+  GetProduct:
+    handler: src/api/get_product.lambda_handler
+    events:
+      - http:
+          method: GET
+          path: /products/{id}
+          cors: true
+
+  DeleteProduct:
+    handler: src/api/delete_product.lambda_handler
+    events:
+      - http:
+          method: DELETE
+          path: /products/{id}
+          cors: true
+
+  UpdateProduct:
+    handler: src/api/update_product.lambda_handler
+    events:
+      - http:
+          method: PUT
+          path: /products
+          cors: true
+
+resources:
+  Resources:
+    productsTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: Products
+        AttributeDefinitions:
+          - AttributeName: _id
+            AttributeType: S
+        KeySchema:
+          - AttributeName: _id
+            KeyType: HASH
+        ProvisionedThroughput:
+          ReadCapacityUnits: 1
+          WriteCapacityUnits: 1
+    mediasBucket:
+      Type: AWS::S3::Bucket
+      Properties:
+        BucketName: ${self:service}-medias
+        AccessControl: PublicRead
+        CorsConfiguration:
+          CorsRules:
+            - AllowedHeaders: ["*"]
+              AllowedMethods: [GET, POST, HEAD, PUT]
+              AllowedOrigins: ["*"]
+    mediasBucketPolicy:
+      Type: AWS::S3::BucketPolicy
+      Properties:
+        PolicyDocument:
+          Statement:
+            - Effect: Allow
+              Principal: "*"
+              Action:
+                - s3:PutObject
+                - s3:PutObjectAcl
+              Resource:
+                Fn::Join:
+                  - ""
+                  - - "arn:aws:s3:::"
+                    - Ref: mediasBucket
+                    - /*
+        Bucket: { Ref: mediasBucket }
